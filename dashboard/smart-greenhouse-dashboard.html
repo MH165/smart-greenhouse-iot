@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart GreenHouse</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --green:#30D158; --blue:#0A84FF; --orange:#FF9F0A; --red:#FF453A;
+    --indigo:#5E5CE6; --teal:#64D2FF;
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --radius:24px;
+  }
+  html[data-theme="dark"]{
+    --bg:#0A0B0F; --bg-2:#070809;
+    --card:rgba(255,255,255,0.045); --card-solid:#15171C;
+    --brd:rgba(255,255,255,0.09); --hair:rgba(255,255,255,0.07);
+    --ink:#F5F5F7; --ink-2:#9A9AA2; --ink-3:#6A6A72;
+    --glass:rgba(20,22,28,0.55); --glass-brd:rgba(255,255,255,0.12);
+    --shadow:0 10px 40px rgba(0,0,0,0.5);
+    --chip-ink:#F5F5F7;
+    --grid:rgba(255,255,255,0.06);
+  }
+  html[data-theme="light"]{
+    --bg:#F0F1F4; --bg-2:#E8EAEE;
+    --card:#FFFFFF; --card-solid:#FFFFFF;
+    --brd:rgba(0,0,0,0.07); --hair:rgba(0,0,0,0.06);
+    --ink:#1D1D1F; --ink-2:#86868B; --ink-3:#A8A8AE;
+    --glass:rgba(255,255,255,0.55); --glass-brd:rgba(255,255,255,0.7);
+    --shadow:0 10px 40px rgba(0,0,0,0.10);
+    --chip-ink:#1D1D1F;
+    --grid:rgba(0,0,0,0.06);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--font);background:var(--bg);color:var(--ink);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    transition:background .6s ease,color .4s ease;min-height:100%;
+  }
+
+  .nav{
+    position:sticky;top:0;z-index:60;display:flex;align-items:center;justify-content:space-between;
+    gap:16px;padding:13px clamp(16px,4vw,40px);
+    background:color-mix(in srgb,var(--bg) 72%,transparent);
+    backdrop-filter:saturate(180%) blur(22px);-webkit-backdrop-filter:saturate(180%) blur(22px);
+    border-bottom:1px solid var(--hair);
+  }
+  .brand{display:flex;align-items:center;gap:11px}
+  .leaf{width:28px;height:28px;display:block}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:-0.01em}
+  .brand .sub{font-size:11.5px;color:var(--ink-2);font-weight:500;margin-top:-1px}
+  .nav-right{display:flex;align-items:center;gap:10px}
+  .status-pill{
+    display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:980px;
+    background:var(--card-solid);border:1px solid var(--brd);font-size:13px;font-weight:550;
+  }
+  html[data-theme="dark"] .status-pill{background:rgba(255,255,255,0.06)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-2);transition:.3s}
+  .status-pill[data-state="sim"] .dot{background:var(--orange);box-shadow:0 0 0 4px rgba(255,159,10,.16)}
+  .status-pill[data-state="live"] .dot{background:var(--green);box-shadow:0 0 0 4px rgba(48,209,88,.18)}
+  .status-pill[data-state="connecting"] .dot{background:var(--blue);animation:blink 1s infinite}
+  .status-pill[data-state="error"] .dot{background:var(--red)}
+  @keyframes blink{50%{opacity:.25}}
+  .icon-btn{
+    width:38px;height:38px;border-radius:50%;border:1px solid var(--brd);background:var(--card-solid);
+    cursor:pointer;display:grid;place-items:center;color:var(--ink);transition:transform .15s,background .15s;
+  }
+  html[data-theme="dark"] .icon-btn{background:rgba(255,255,255,0.06)}
+  .icon-btn:active{transform:scale(.92)}
+  .icon-btn svg{width:18px;height:18px}
+
+  main{max-width:1240px;margin:0 auto;padding:clamp(16px,3vw,28px) clamp(16px,4vw,40px) 60px}
+
+  .hero{
+    position:relative;border-radius:28px;overflow:hidden;border:1px solid var(--brd);
+    box-shadow:var(--shadow);height:clamp(380px,52vw,500px);margin-bottom:22px;
+  }
+  .scene{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .hero-grad{position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(180deg,rgba(0,0,0,0.18),transparent 30%,transparent 60%,rgba(0,0,0,0.22));}
+  html[data-theme="light"] .hero-grad{background:linear-gradient(180deg,rgba(255,255,255,0.12),transparent 40%,rgba(0,0,0,0.06))}
+
+  .hero-top{position:absolute;top:0;left:0;right:0;padding:22px 24px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none}
+  .place{font-size:24px;font-weight:600;letter-spacing:-0.02em;color:#fff;text-shadow:0 1px 12px rgba(0,0,0,.35)}
+  .place small{display:block;font-size:13px;font-weight:550;opacity:.92;margin-top:3px}
+  html[data-theme="light"] .place{color:#10231a;text-shadow:0 1px 10px rgba(255,255,255,.4)}
+
+  .chips{
+    position:absolute;left:0;right:0;bottom:0;padding:18px 18px 18px;
+    display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;
+  }
+  .chip{
+    flex:1;min-width:118px;border-radius:18px;padding:13px 15px;
+    background:var(--glass);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid var(--glass-brd);color:var(--chip-ink);
+  }
+  .chip .clabel{font-size:11.5px;font-weight:650;letter-spacing:.02em;opacity:.85;display:flex;align-items:center;gap:6px}
+  .chip .cval{font-size:30px;font-weight:600;letter-spacing:-0.03em;line-height:1.05;margin-top:6px;font-variant-numeric:tabular-nums}
+  .chip .cval small{font-size:14px;font-weight:600;opacity:.7;margin-left:2px}
+  .chip .cstate{font-size:11.5px;font-weight:650;margin-top:3px}
+  .chip .tag{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:980px;color:#fff;letter-spacing:.03em}
+  .tag.zb{background:#5E5CE6}.tag.lora{background:#FF9F0A}
+  .cdot{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.4;transition:.2s}
+  .cdot.beat{opacity:1;animation:pop .9s ease}
+  @keyframes pop{0%{transform:scale(1)}30%{transform:scale(1.9)}100%{transform:scale(1)}}
+
+  .pump-chip{flex:1.1;min-width:150px;display:flex;flex-direction:column;gap:9px}
+  .pump-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .pump-name{font-size:13px;font-weight:650}
+  .pump-now{font-size:11.5px;font-weight:600;opacity:.8}
+  .switch{
+    --w:118px;--h:40px;position:relative;width:var(--w);height:var(--h);border:none;cursor:pointer;
+    border-radius:980px;background:rgba(120,120,128,.4);transition:background .3s;padding:0;
+  }
+  .switch[aria-pressed="true"]{background:var(--green)}
+  .switch .knob{position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;background:#fff;
+    box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .3s cubic-bezier(.3,1.3,.5,1)}
+  .switch[aria-pressed="true"] .knob{transform:translateX(78px)}
+  .switch .lbl{position:absolute;top:0;height:100%;display:flex;align-items:center;font-size:12.5px;font-weight:700;color:#fff}
+  .switch .on{left:15px;opacity:0;transition:.3s}.switch .off{right:14px;opacity:.85;transition:.3s}
+  .switch[aria-pressed="true"] .on{opacity:1}.switch[aria-pressed="true"] .off{opacity:0}
+
+  .deck{display:grid;grid-template-columns:1.6fr 1fr;gap:18px}
+  @media (max-width:880px){.deck{grid-template-columns:1fr}}
+  .panel{
+    background:var(--card);border:1px solid var(--brd);border-radius:var(--radius);padding:20px;
+    backdrop-filter:blur(12px);
+  }
+  html[data-theme="light"] .panel{background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .panel h3{font-size:13px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-2);margin-bottom:4px}
+  .panel .psub{font-size:12.5px;color:var(--ink-3);margin-bottom:14px}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px}
+  .lg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:550;color:var(--ink-2)}
+  .lg b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+  .lg i{width:9px;height:9px;border-radius:3px;display:block}
+  #chart{width:100%;height:230px;display:block}
+
+  .topo{width:100%;height:168px;display:block;margin-bottom:6px}
+  .topo-cap{font-size:11.5px;color:var(--ink-3);text-align:center}
+  .col-right{display:flex;flex-direction:column;gap:18px}
+
+  .log{max-height:200px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin-right:-6px;padding-right:6px}
+  .log-row{display:flex;gap:10px;align-items:baseline;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--hair)}
+  .log-row:last-child{border-bottom:none}
+  .log-time{font-family:var(--mono);font-size:11px;color:var(--ink-3);flex-shrink:0}
+  .log-msg{color:var(--ink);font-weight:500}
+  .log-msg .acc{font-weight:650}
+  .log::-webkit-scrollbar{width:6px}.log::-webkit-scrollbar-thumb{background:var(--hair);border-radius:3px}
+
+  .scrim{position:fixed;inset:0;z-index:120;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);
+    display:none;align-items:center;justify-content:center;padding:20px}
+  .scrim.open{display:flex}
+  .modal{width:min(520px,100%);background:var(--card-solid);border:1px solid var(--brd);border-radius:26px;
+    box-shadow:0 30px 80px rgba(0,0,0,.5);overflow:hidden;animation:rise .3s cubic-bezier(.2,.8,.2,1)}
+  @keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}}
+  .modal-head{padding:22px 24px 6px}
+  .modal-head h3{font-size:20px;font-weight:600;letter-spacing:-0.01em}
+  .modal-head p{font-size:13.5px;color:var(--ink-2);margin-top:5px;line-height:1.45}
+  .modal-body{padding:14px 24px 8px;max-height:56vh;overflow:auto}
+  .seg{display:flex;background:var(--bg-2);border-radius:12px;padding:3px;margin:4px 0 18px}
+  .seg button{flex:1;border:none;background:transparent;padding:9px;border-radius:9px;font-family:var(--font);
+    font-size:14px;font-weight:600;color:var(--ink-2);cursor:pointer;transition:.2s}
+  .seg button.active{background:var(--card-solid);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+  html[data-theme="dark"] .seg button.active{background:rgba(255,255,255,0.1)}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+  .field input{width:100%;font-family:var(--font);font-size:15px;color:var(--ink);padding:11px 13px;
+    border:1px solid var(--brd);border-radius:12px;background:var(--bg-2);transition:.2s}
+  .field input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 4px rgba(10,132,255,.14)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .hint{font-size:12px;color:var(--ink-2);line-height:1.55;margin:2px 0 12px;padding:11px 13px;background:var(--bg-2);border-radius:12px}
+  .hint code{font-family:var(--mono);font-size:11.5px;color:var(--teal)}
+  .modal-foot{padding:14px 24px 22px;display:flex;gap:10px;border-top:1px solid var(--hair);margin-top:6px}
+  .btn{flex:1;font-family:var(--font);font-size:15px;font-weight:600;padding:12px;border-radius:13px;cursor:pointer;
+    border:1px solid var(--brd);background:var(--card-solid);color:var(--ink);transition:.15s}
+  .btn:active{transform:scale(.98)}
+  .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .conf{display:none}.conf.show{display:block}
+
+  footer{text-align:center;color:var(--ink-3);font-size:12px;font-weight:500;margin-top:36px;line-height:1.6}
+  @media (max-width:560px){.brand .sub{display:none}.chip .cval{font-size:25px}.place{font-size:20px}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="brand">
+    <svg class="leaf" viewBox="0 0 24 24" fill="none">
+      <path d="M5 19c0-7 5-13 14-14-1 9-7 14-14 14Z" fill="#30D158"/>
+      <path d="M5 19c3-5 7-8 11-9" stroke="#0B7A33" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+    <div><h1>Smart GreenHouse</h1><div class="sub">Zigbee · LoRaWAN · unified over MQTT</div></div>
+  </div>
+  <div class="nav-right">
+    <span class="status-pill" id="statusPill" data-state="sim"><span class="dot"></span><span id="statusText">Simulation</span></span>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle day and night">
+      <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H10a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V10a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+    </button>
+  </div>
+</nav>
+
+<main>
+  <section class="hero">
+    <svg class="scene" id="scene" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop id="skyTop" offset="0" stop-color="#10203f"/>
+          <stop id="skyBot" offset="1" stop-color="#1d3550"/>
+        </linearGradient>
+        <radialGradient id="sunGlowG" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stop-color="#FFE9A8" stop-opacity="0.9"/>
+          <stop offset="1" stop-color="#FFE9A8" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="soilGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop id="soilTop" offset="0" stop-color="#5a3d24"/>
+          <stop id="soilBot" offset="1" stop-color="#34230f"/>
+        </linearGradient>
+        <linearGradient id="hazeGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#c9a24b" stop-opacity="0"/>
+          <stop offset="1" stop-color="#b59038" stop-opacity="0.5"/>
+        </linearGradient>
+      </defs>
+
+      <rect x="0" y="0" width="800" height="500" fill="url(#skyGrad)"/>
+      <g id="stars"></g>
+      <circle id="sunGlow" cx="640" cy="120" r="120" fill="url(#sunGlowG)" opacity="0"/>
+      <circle id="celest" cx="640" cy="120" r="40" fill="#E8ECF4"/>
+      <circle id="moonShade" cx="655" cy="108" r="40" fill="#0e1c34" opacity="1"/>
+
+      <path id="hillBack" d="M0 360 Q200 300 400 345 T800 330 V500 H0 Z" fill="#14233f"/>
+      <path id="hillFront" d="M0 410 Q260 350 520 400 T800 388 V500 H0 Z" fill="#0f1b30"/>
+
+      <rect id="haze" x="0" y="300" width="800" height="200" fill="url(#hazeGrad)" opacity="0"/>
+
+      <path id="soilBed" d="M-20 470 Q400 415 820 470 V520 H-20 Z" fill="url(#soilGrad)"/>
+      <ellipse cx="400" cy="470" rx="430" ry="34" fill="#000" opacity="0.12"/>
+
+      <g id="plant" transform="translate(400 472)">
+        <path id="stem" d="M0 0 C -3 -50 4 -90 0 -150" stroke="#3f9a3c" stroke-width="7" fill="none" stroke-linecap="round"/>
+        <g class="leaf" id="leafL1" transform="translate(0 -55)"><path d="M0 0 C -42 -12 -60 12 -78 6 C -56 -22 -28 -30 0 0 Z" fill="#46b24d"/></g>
+        <g class="leaf" id="leafR1" transform="translate(0 -55)"><path d="M0 0 C 42 -12 60 12 78 6 C 56 -22 28 -30 0 0 Z" fill="#3da047"/></g>
+        <g class="leaf" id="leafL2" transform="translate(0 -100)"><path d="M0 0 C -34 -10 -48 10 -64 5 C -46 -18 -22 -24 0 0 Z" fill="#4fc057"/></g>
+        <g class="leaf" id="leafR2" transform="translate(0 -100)"><path d="M0 0 C 34 -10 48 10 64 5 C 46 -18 22 -24 0 0 Z" fill="#45b04e"/></g>
+        <g id="flower" transform="translate(0 -150)">
+          <g id="petals">
+            <circle cx="0" cy="-14" r="11" fill="#FF6FA5"/><circle cx="13" cy="-4" r="11" fill="#FF7DAE"/>
+            <circle cx="8" cy="12" r="11" fill="#FF6FA5"/><circle cx="-8" cy="12" r="11" fill="#FF7DAE"/>
+            <circle cx="-13" cy="-4" r="11" fill="#FF6FA5"/>
+          </g>
+          <circle cx="0" cy="0" r="9" fill="#FFD66B"/>
+        </g>
+      </g>
+
+      <g id="drops"></g>
+    </svg>
+    <div class="hero-grad"></div>
+
+    <div class="hero-top"><div class="place">The Garden<small id="placeSub">Reading the environment…</small></div></div>
+
+    <div class="chips">
+      <div class="chip" data-k="temp">
+        <div class="clabel"><span class="cdot" id="cdot-temp"></span>Temperature <span class="tag lora">LoRa</span></div>
+        <div class="cval"><span id="cval-temp">--</span><small>°C</small></div><div class="cstate" id="cstate-temp"></div>
+      </div>
+      <div class="chip" data-k="hum">
+        <div class="clabel"><span class="cdot" id="cdot-hum"></span>Humidity <span class="tag lora">LoRa</span></div>
+        <div class="cval"><span id="cval-hum">--</span><small>%</small></div><div class="cstate" id="cstate-hum"></div>
+      </div>
+      <div class="chip" data-k="soil">
+        <div class="clabel"><span class="cdot" id="cdot-soil"></span>Soil <span class="tag zb">Zigbee</span></div>
+        <div class="cval"><span id="cval-soil">--</span><small>%</small></div><div class="cstate" id="cstate-soil"></div>
+      </div>
+      <div class="chip" data-k="co2">
+        <div class="clabel"><span class="cdot" id="cdot-co2"></span>CO₂ <span class="tag zb">Zigbee</span></div>
+        <div class="cval"><span id="cval-co2">--</span><small>ppm</small></div><div class="cstate" id="cstate-co2"></div>
+      </div>
+      <div class="chip pump-chip">
+        <div class="pump-row"><span class="pump-name">Irrigation</span><span class="pump-now" id="pumpNow">Off</span></div>
+        <button class="switch" id="pumpSwitch" role="switch" aria-pressed="false" aria-label="Toggle pump">
+          <span class="lbl on">ON</span><span class="lbl off">OFF</span><span class="knob"></span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="deck">
+    <div class="panel">
+      <h3>Live Telemetry</h3>
+      <div class="psub">All four sensors on one timeline · normalized to each range</div>
+      <div class="legend" id="legend"></div>
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="col-right">
+      <div class="panel">
+        <h3>Network</h3><div class="psub">Three radios, one broker</div>
+        <svg class="topo" id="topo" viewBox="0 0 360 168"></svg>
+        <div class="topo-cap" id="topoCap">Simulated data stream</div>
+      </div>
+      <div class="panel">
+        <h3>Activity</h3><div class="psub">Live events &amp; status changes</div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Built for the smart-GreenHouse research demo · ESP32-H2 + ESP32-C6 (Zigbee) · XIAO ESP32-S3 (LoRaWAN → TTN)</footer>
+</main>
+
+<div class="scrim" id="scrim">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Connection settings">
+    <div class="modal-head"><h3>Connection</h3>
+      <p>Preview in Simulation now, or connect Live to your MQTT broker when the hardware is ready.</p></div>
+    <div class="modal-body">
+      <div class="seg" id="modeSeg"><button data-mode="sim" class="active">Simulation</button><button data-mode="live">Live (MQTT)</button></div>
+      <div class="conf" id="liveConf">
+        <div class="field"><label>Broker WebSocket URL</label><input id="cfgUrl" value="ws://localhost:9001" placeholder="ws://192.168.1.50:9001"></div>
+        <div class="row2"><div class="field"><label>Username</label><input id="cfgUser" placeholder="optional"></div>
+          <div class="field"><label>Password</label><input id="cfgPass" type="password" placeholder="optional"></div></div>
+        <div class="hint">Mosquitto needs a WebSocket listener — in <code>mosquitto.conf</code>:<br><code>listener 9001</code><br><code>protocol websockets</code><br>then restart. Use <code>wss://</code> for TLS.</div>
+        <div class="field"><label>Soil topic</label><input id="tSoil" value="zigbee2mqtt/garden_soil"></div>
+        <div class="field"><label>CO₂ topic</label><input id="tCo2" value="zigbee2mqtt/garden_co2"></div>
+        <div class="row2"><div class="field"><label>Temperature topic</label><input id="tTemp" value="garden/temperature"></div>
+          <div class="field"><label>Humidity topic</label><input id="tHum" value="garden/humidity"></div></div>
+        <div class="field"><label>Pump state topic</label><input id="tPump" value="zigbee2mqtt/garden_pump"></div>
+        <div class="field"><label>Pump command topic</label><input id="tPumpSet" value="zigbee2mqtt/garden_pump/set"></div>
+        <div class="hint">The reader auto-detects fields (<code>co2</code>, <code>soil</code>, <code>temperature</code>, <code>state</code>…) and reads TTN's <code>decoded_payload</code>, so defaults work for a standard setup.</div>
+      </div>
+      <div class="conf show" id="simConf"><div class="hint">Simulation streams realistic readings so you can verify the scene, chart, topology, log and pump toggle — no broker needed. Watering visibly raises soil moisture and wakes the plant.</div></div>
+    </div>
+    <div class="modal-foot"><button class="btn" id="cancelBtn">Cancel</button><button class="btn primary" id="applyBtn">Apply</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $=id=>document.getElementById(id);
+  const RANGE={temp:{rMin:5,rMax:45,unit:"°C"},hum:{rMin:0,rMax:100,unit:"%"},soil:{rMin:0,rMax:100,unit:"%"},co2:{rMin:400,rMax:2000,unit:"ppm"}};
+  const ACCENT={temp:"#FF9F0A",hum:"#0A84FF",soil:"#30D158",co2:"#5E5CE6"};
+  const LABEL={temp:"Temp",hum:"Humidity",soil:"Soil",co2:"CO₂"};
+  const HIST=40;
+  const state={mode:"sim",temp:null,hum:null,soil:null,co2:null,pump:false,
+    hist:{temp:[],hum:[],soil:[],co2:[]},word:{temp:"",hum:"",soil:"",co2:""}};
+  let client=null,simTimer=null;
+
+  function classify(k,v){
+    if(v==null||isNaN(v))return{word:"",color:ACCENT[k]};
+    if(k==="temp"){if(v>=18&&v<=28)return{word:"Ideal",color:"#30D158"};if((v>=12&&v<18)||(v>28&&v<=34))return{word:"Watch",color:"#FF9F0A"};return{word:v<12?"Cold":"Hot",color:"#FF453A"};}
+    if(k==="hum"){if(v>=40&&v<=70)return{word:"Comfortable",color:"#0A84FF"};if((v>=30&&v<40)||(v>70&&v<=85))return{word:"Watch",color:"#FF9F0A"};return{word:v<30?"Dry":"Damp",color:"#FF453A"};}
+    if(k==="soil"){if(v<25)return{word:"Thirsty",color:"#FF453A"};if(v<35)return{word:"Drying",color:"#FF9F0A"};if(v<=80)return{word:"Healthy",color:"#30D158"};if(v<=90)return{word:"Moist",color:"#FF9F0A"};return{word:"Saturated",color:"#0A84FF"};}
+    if(k==="co2"){if(v<800)return{word:"Fresh",color:"#30D158"};if(v<=1200)return{word:"Stuffy",color:"#FF9F0A"};return{word:"High",color:"#FF453A"};}
+    return{word:"",color:ACCENT[k]};
+  }
+  const fmt=(k,v)=>v==null||isNaN(v)?"--":k==="co2"?Math.round(v).toString():k==="temp"?v.toFixed(1):Math.round(v).toString();
+  function hx(c){c=c.replace("#","");return[parseInt(c.slice(0,2),16),parseInt(c.slice(2,4),16),parseInt(c.slice(4,6),16)];}
+  function lerpC(a,b,t){const A=hx(a),B=hx(b);return`rgb(${Math.round(A[0]+(B[0]-A[0])*t)},${Math.round(A[1]+(B[1]-A[1])*t)},${Math.round(A[2]+(B[2]-A[2])*t)})`;}
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+  const SKY={day:{cold:["#5b8fd6","#bfe0ee"],ideal:["#5aa6e6","#d2ecc8"],hot:["#f2a45f","#f8d9b2"]},
+             night:{cold:["#0a1430","#16294a"],ideal:["#0e1d3c","#1b3350"],hot:["#2a1230","#3a2138"]}};
+  const isNight=()=>document.documentElement.getAttribute("data-theme")==="dark";
+  function tempBlend(){
+    const v=state.temp==null?23:state.temp,set=isNight()?SKY.night:SKY.day;let top,bot;
+    if(v<=18){const t=clamp((v-8)/10,0,1);top=lerpC(set.cold[0],set.ideal[0],t);bot=lerpC(set.cold[1],set.ideal[1],t);}
+    else{const t=clamp((v-18)/14,0,1);top=lerpC(set.ideal[0],set.hot[0],t);bot=lerpC(set.ideal[1],set.hot[1],t);}
+    return[top,bot];
+  }
+  function setLeaf(id,y,perk,dir){const droop=(1-perk)*32;$(id).setAttribute("transform",`translate(0 ${y}) rotate(${(dir*droop).toFixed(1)})`);}
+  function updateScene(){
+    const night=isNight(),[top,bot]=tempBlend();
+    $("skyTop").setAttribute("stop-color",top);$("skyBot").setAttribute("stop-color",bot);
+    $("celest").setAttribute("fill",night?"#E8ECF4":"#FFD66B");
+    $("moonShade").style.opacity=night?"1":"0";$("sunGlow").style.opacity=night?"0":"0.85";$("stars").style.opacity=night?"1":"0";
+    $("hillBack").setAttribute("fill",night?"#14233f":"#73b56e");$("hillFront").setAttribute("fill",night?"#0f1b30":"#5fa45a");
+    const m=clamp((state.soil==null?40:state.soil)/100,0,1);
+    $("soilTop").setAttribute("stop-color",lerpC("#9c7146","#4a3018",m));$("soilBot").setAttribute("stop-color",lerpC("#6f4d28","#2c1c0c",m));
+    const c=state.co2==null?500:state.co2;$("haze").style.opacity=(clamp((c-500)/1100,0,1)*0.6).toFixed(2);
+    const perk=clamp(((state.soil==null?40:state.soil)-20)/55,0,1);
+    setLeaf("leafL1",-55,perk,1);setLeaf("leafR1",-55,perk,-1);setLeaf("leafL2",-100,perk,1);setLeaf("leafR2",-100,perk,-1);
+    const fs=0.55+perk*0.45;$("flower").setAttribute("transform",`translate(0 -150) scale(${fs.toFixed(2)})`);
+    $("petals").style.opacity=(0.35+perk*0.65).toFixed(2);
+    ["leafL1","leafR1","leafL2","leafR2"].forEach(id=>$(id).querySelector("path").setAttribute("fill",lerpC("#9aa86a","#46b24d",perk)));
+    $("stem").setAttribute("stroke",lerpC("#8f9a4a","#3f9a3c",perk));
+  }
+  (function(){let s="";for(let i=0;i<60;i++){const x=(Math.random()*800).toFixed(0),y=(Math.random()*300).toFixed(0),r=(Math.random()*1.3+0.3).toFixed(2),o=(Math.random()*0.6+0.3).toFixed(2);s+=`<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity="${o}"/>`;}$("stars").innerHTML=s;})();
+
+  let drops=[],rafOn=false;
+  function spawnDrop(){drops.push({x:360+Math.random()*80,y:60+Math.random()*40,vy:2+Math.random()*1.5,r:2+Math.random()*1.5});}
+  function tickDrops(){
+    if(state.pump&&drops.length<26&&Math.random()<0.6)spawnDrop();
+    let s="";drops=drops.filter(d=>{d.y+=d.vy;d.vy+=0.25;if(d.y>462)return false;s+=`<circle cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="${d.r.toFixed(1)}" fill="#9ad8ff" opacity="0.85"/>`;return true;});
+    $("drops").innerHTML=s;if(state.pump||drops.length)requestAnimationFrame(tickDrops);else rafOn=false;
+  }
+  function ensureDrops(){if(!rafOn){rafOn=true;requestAnimationFrame(tickDrops);}}
+
+  function renderChip(k){
+    const v=state[k],cl=classify(k,v);
+    $("cval-"+k).textContent=fmt(k,v);
+    const sw=$("cstate-"+k);sw.textContent=cl.word;sw.style.color=cl.color;
+    const d=$("cdot-"+k);d.style.color=cl.color;d.classList.remove("beat");void d.offsetWidth;d.classList.add("beat");
+  }
+
+  const cv=$("chart"),ctx=cv.getContext("2d"),DPR=window.devicePixelRatio||1;
+  function sizeChart(){const r=cv.getBoundingClientRect();cv.width=r.width*DPR;cv.height=r.height*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);}
+  function drawChart(){
+    const r=cv.getBoundingClientRect(),W=r.width,H=r.height;ctx.clearRect(0,0,W,H);
+    const grid=getComputedStyle(document.documentElement).getPropertyValue("--grid").trim()||"rgba(255,255,255,.06)";
+    ctx.strokeStyle=grid;ctx.lineWidth=1;
+    for(let i=0;i<=4;i++){const y=(H-16)*i/4+8;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    ["temp","hum","soil","co2"].forEach(k=>{
+      const data=state.hist[k];if(data.length<2)return;
+      const rg=RANGE[k],n=data.length,c=ACCENT[k];
+      const X=i=>(i/(HIST-1))*W,Y=val=>{let p=clamp((val-rg.rMin)/(rg.rMax-rg.rMin),0,1);return (H-16)-(p*(H-22))+8;};
+      const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,c+"30");grad.addColorStop(1,c+"00");
+      ctx.beginPath();ctx.moveTo(X(0),Y(data[0]));for(let i=1;i<n;i++)ctx.lineTo(X(i),Y(data[i]));
+      ctx.lineTo(X(n-1),H);ctx.lineTo(X(0),H);ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+      ctx.beginPath();ctx.moveTo(X(0),Y(data[0]));for(let i=1;i<n;i++)ctx.lineTo(X(i),Y(data[i]));
+      ctx.strokeStyle=c;ctx.lineWidth=2.2;ctx.lineJoin="round";ctx.lineCap="round";ctx.stroke();
+      ctx.beginPath();ctx.arc(X(n-1),Y(data[n-1]),3,0,7);ctx.fillStyle=c;ctx.fill();
+    });
+  }
+  function renderLegend(){
+    $("legend").innerHTML=["temp","hum","soil","co2"].map(k=>`<span class="lg"><i style="background:${ACCENT[k]}"></i>${LABEL[k]} <b>${fmt(k,state[k])}${state[k]!=null?" "+RANGE[k].unit:""}</b></span>`).join("");
+  }
+
+  function buildTopo(){
+    const c=ACCENT;
+    const link=(x1,y1,x2,y2,id)=>`<path id="${id}" d="M${x1} ${y1} L${x2} ${y2}" stroke="var(--ink-3)" stroke-width="1.6" stroke-dasharray="3 5" fill="none" opacity="0.5"><animate attributeName="stroke-dashoffset" from="8" to="0" dur="0.6s" repeatCount="indefinite"/></path>`;
+    const node=(x,y,t,col)=>`<g><circle cx="${x}" cy="${y}" r="15" fill="var(--card-solid)" stroke="${col}" stroke-width="1.8"/><text x="${x}" y="${y+3}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--ink)">${t}</text></g>`;
+    const big=(x,y,t)=>`<g><rect x="${x-26}" y="${y-16}" width="52" height="32" rx="9" fill="var(--card-solid)" stroke="var(--ink-2)" stroke-width="1.5"/><text x="${x}" y="${y+3}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--ink)">${t}</text></g>`;
+    $("topo").innerHTML=
+      link(45,38,180,84,"l-h2")+link(45,84,180,84,"l-c6")+link(45,130,180,84,"l-xiao")+link(180,84,300,84,"l-broker")+
+      node(30,38,"H2",c.soil)+node(30,84,"C6",c.co2)+node(30,130,"XIAO",c.temp)+big(180,84,"MQTT")+node(330,84,"UI","#0A84FF");
+  }
+  const accFor=id=>id==="l-h2"?ACCENT.soil:id==="l-c6"?ACCENT.co2:id==="l-xiao"?ACCENT.temp:"#0A84FF";
+  function pulseLink(id){const p=$(id);if(!p)return;p.setAttribute("opacity","1");p.setAttribute("stroke",accFor(id));const b=$("l-broker");b.setAttribute("opacity","1");b.setAttribute("stroke","#0A84FF");setTimeout(()=>{p.setAttribute("opacity","0.5");p.setAttribute("stroke","var(--ink-3)");b.setAttribute("opacity","0.5");b.setAttribute("stroke","var(--ink-3)");},480);}
+
+  const logEl=$("log");let logCount=0;
+  function log(msg,acc){
+    const t=new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    const row=document.createElement("div");row.className="log-row";
+    row.innerHTML=`<span class="log-time">${t}</span><span class="log-msg">${acc?`<span class="acc" style="color:${acc.color}">${acc.text}</span> `:""}${msg}</span>`;
+    logEl.prepend(row);if(++logCount>60)logEl.lastChild.remove();
+  }
+
+  function push(k,v){
+    if(v==null||isNaN(v))return;
+    state[k]=v;const h=state.hist[k];h.push(v);if(h.length>HIST)h.shift();
+    renderChip(k);renderLegend();drawChart();updateScene();
+    pulseLink({temp:"l-xiao",hum:"l-xiao",soil:"l-h2",co2:"l-c6"}[k]);
+    const w=classify(k,v).word;
+    if(w&&w!==state.word[k]){state.word[k]=w;log(`${LABEL[k]} is ${v.toFixed(k==="temp"?1:0)}${RANGE[k].unit}`,{text:w,color:classify(k,v).color});}
+    updateOverall();
+  }
+  function updateOverall(){
+    const el=$("placeSub");
+    if(state.temp==null&&state.soil==null){el.textContent="Reading the environment…";return;}
+    const issues=[];
+    if(["Thirsty","Drying"].includes(state.word.soil))issues.push("soil needs water");
+    if(state.word.co2==="High")issues.push("CO₂ high");
+    if(["Hot","Cold"].includes(state.word.temp))issues.push("temp "+state.word.temp.toLowerCase());
+    el.textContent=issues.length?issues.join(" · "):"Everything looks healthy";
+  }
+
+  const pumpSwitch=$("pumpSwitch");
+  function setPump(on,fromUser){
+    state.pump=!!on;pumpSwitch.setAttribute("aria-pressed",state.pump?"true":"false");
+    $("pumpNow").textContent=state.pump?"Watering":"Off";if(state.pump)ensureDrops();
+    if(fromUser){log(state.pump?"Pump started":"Pump stopped",{text:"Pump",color:"#0A84FF"});
+      if(state.mode==="live"&&client&&client.connected)client.publish(cfg.tPumpSet,JSON.stringify({state:state.pump?"ON":"OFF"}));}
+  }
+  pumpSwitch.addEventListener("click",()=>setPump(!state.pump,true));
+
+  function rw(v,min,max,step){v+=(Math.random()-0.5)*step;return clamp(v,min,max);}
+  let sim={temp:23.5,hum:61,soil:48,co2:520};
+  function simTick(){
+    sim.temp=rw(sim.temp,17,31,0.5);sim.hum=rw(sim.hum,42,78,1.6);sim.co2=rw(sim.co2,420,1100,55);
+    if(Math.random()<0.06)sim.co2=Math.min(1500,sim.co2+250);
+    sim.soil+=state.pump?(1.6+Math.random()*0.8):-(0.35+Math.random()*0.3);sim.soil=clamp(sim.soil,8,96);
+    push("temp",sim.temp);push("hum",sim.hum);push("soil",sim.soil);push("co2",sim.co2);
+  }
+  function startSim(){
+    stopLive();state.mode="sim";setStatus("sim","Simulation");$("topoCap").textContent="Simulated data stream";
+    if(simTimer)clearInterval(simTimer);state.hist={temp:[],hum:[],soil:[],co2:[]};
+    for(let i=0;i<8;i++)simTick();simTimer=setInterval(simTick,1500);
+    log("Simulation started",{text:"System",color:"#30D158"});
+  }
+
+  const cfg={url:"ws://localhost:9001",user:"",pass:"",tSoil:"zigbee2mqtt/garden_soil",tCo2:"zigbee2mqtt/garden_co2",
+    tTemp:"garden/temperature",tHum:"garden/humidity",tPump:"zigbee2mqtt/garden_pump",tPumpSet:"zigbee2mqtt/garden_pump/set"};
+  // Soil calibration: raw value in air (dry) and in water (wet). Edit if you recalibrate.
+  const SOIL_DRY=0, SOIL_WET=76;
+  const DEBUG_MQTT=false; // set true to log every received topic in the Activity panel
+  function deepNum(o,keys){if(o==null)return null;if(typeof o==="object"){for(const k of Object.keys(o)){if(keys.includes(k.toLowerCase())&&typeof o[k]==="number")return o[k];}for(const k of Object.keys(o)){const r=deepNum(o[k],keys);if(r!=null)return r;}}return null;}
+  function deepStr(o,keys){if(o==null||typeof o!=="object")return null;for(const k of Object.keys(o)){if(keys.includes(k.toLowerCase())&&typeof o[k]==="string")return o[k];}for(const k of Object.keys(o)){const r=deepStr(o[k],keys);if(r!=null)return r;}return null;}
+  function onMsg(topic,raw){
+    let data;const txt=raw.toString();try{data=JSON.parse(txt);}catch(e){data=txt;}
+    const num=typeof data==="number"?data:null;
+    // pump state may share a topic with soil (same garden_h2 device) — handle, but DON'T return early
+    if(topic===cfg.tPump){const s=typeof data==="object"?deepStr(data,["state"]):txt;if(typeof s==="string")setPump(/on|true|1/i.test(s),false);}
+    if(topic===cfg.tTemp)return push("temp",num!=null?num:deepNum(data,["temperature","temp"]));
+    if(topic===cfg.tHum)return push("hum",num!=null?num:deepNum(data,["humidity","hum","rh"]));
+    if(topic===cfg.tSoil){
+      let soilRaw = num!=null?num:deepNum(data,["soil","moisture","soil_moisture","soil_moisture_11","analog_input"]);
+      if(soilRaw==null && typeof data==="object"){ // catch any key that starts with soil_moisture
+        for(const k of Object.keys(data)){ if(/^soil_moisture/i.test(k) && typeof data[k]==="number"){ soilRaw=data[k]; break; } }
+      }
+      if(soilRaw!=null){ soilRaw = clamp((soilRaw - SOIL_DRY)/(SOIL_WET - SOIL_DRY)*100, 0, 100); }
+      return push("soil",soilRaw);
+    }
+    if(topic===cfg.tCo2)return push("co2",num!=null?num:deepNum(data,["co2","carbon_dioxide","carbondioxide"]));
+  }
+  function stopLive(){if(client){try{client.end(true);}catch(e){}client=null;}}
+  function startLive(){
+    if(simTimer){clearInterval(simTimer);simTimer=null;}
+    stopLive();state.mode="live";setStatus("connecting","Connecting…");$("topoCap").textContent="Connecting to broker…";
+    state.hist={temp:[],hum:[],soil:[],co2:[]};["temp","hum","soil","co2"].forEach(k=>{state[k]=null;state.word[k]="";renderChip(k);});
+    renderLegend();drawChart();
+    const opts={reconnectPeriod:4000,connectTimeout:8000};if(cfg.user)opts.username=cfg.user;if(cfg.pass)opts.password=cfg.pass;
+    try{client=mqtt.connect(cfg.url,opts);}catch(e){setStatus("error","Bad URL");return;}
+    client.on("connect",()=>{setStatus("live","Live");$("topoCap").textContent="Receiving live data";
+      const topics=[...new Set([cfg.tSoil,cfg.tCo2,cfg.tTemp,cfg.tHum,cfg.tPump].filter(Boolean))];
+      topics.forEach(t=>client.subscribe(t,err=>{ if(err) log("Subscribe failed: "+t,{text:"Error",color:"#FF453A"}); }));
+      log("Connected · "+topics.length+" topics",{text:"MQTT",color:"#30D158"});});
+    client.on("message",(t,p)=>{
+      if(DEBUG_MQTT) log("rx "+t,{text:"·",color:"#64D2FF"});
+      try{onMsg(t,p);}catch(e){log("Parse error: "+e.message,{text:"Error",color:"#FF453A"});}
+    });
+    client.on("error",()=>setStatus("error","Error"));
+    client.on("reconnect",()=>setStatus("connecting","Reconnecting…"));
+    client.on("close",()=>{if(state.mode==="live")setStatus("connecting","Offline…");});
+  }
+  function setStatus(s,t){$("statusPill").setAttribute("data-state",s);$("statusText").textContent=t;}
+
+  function setTheme(mode){
+    document.documentElement.setAttribute("data-theme",mode);
+    $("themeIcon").innerHTML=mode==="dark"
+      ?'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>'
+      :'<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8"/>';
+    updateScene();drawChart();buildTopo();
+  }
+  $("themeBtn").addEventListener("click",()=>setTheme(isNight()?"light":"dark"));
+
+  const scrim=$("scrim");let pendingMode="sim";
+  function openModal(){
+    pendingMode=state.mode;
+    document.querySelectorAll("#modeSeg button").forEach(b=>b.classList.toggle("active",b.dataset.mode===state.mode));
+    $("liveConf").classList.toggle("show",state.mode==="live");$("simConf").classList.toggle("show",state.mode==="sim");
+    $("cfgUrl").value=cfg.url;$("cfgUser").value=cfg.user;$("cfgPass").value=cfg.pass;
+    $("tSoil").value=cfg.tSoil;$("tCo2").value=cfg.tCo2;$("tTemp").value=cfg.tTemp;$("tHum").value=cfg.tHum;
+    $("tPump").value=cfg.tPump;$("tPumpSet").value=cfg.tPumpSet;scrim.classList.add("open");
+  }
+  const closeModal=()=>scrim.classList.remove("open");
+  $("settingsBtn").addEventListener("click",openModal);
+  $("cancelBtn").addEventListener("click",closeModal);
+  scrim.addEventListener("click",e=>{if(e.target===scrim)closeModal();});
+  document.querySelectorAll("#modeSeg button").forEach(b=>b.addEventListener("click",()=>{
+    pendingMode=b.dataset.mode;document.querySelectorAll("#modeSeg button").forEach(x=>x.classList.toggle("active",x===b));
+    $("liveConf").classList.toggle("show",pendingMode==="live");$("simConf").classList.toggle("show",pendingMode==="sim");
+  }));
+  $("applyBtn").addEventListener("click",()=>{
+    if(pendingMode==="live"){
+      cfg.url=$("cfgUrl").value.trim()||cfg.url;cfg.user=$("cfgUser").value.trim();cfg.pass=$("cfgPass").value;
+      cfg.tSoil=$("tSoil").value.trim();cfg.tCo2=$("tCo2").value.trim();cfg.tTemp=$("tTemp").value.trim();
+      cfg.tHum=$("tHum").value.trim();cfg.tPump=$("tPump").value.trim();cfg.tPumpSet=$("tPumpSet").value.trim();
+      closeModal();startLive();
+    }else{closeModal();startSim();}
+  });
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
+
+  window.addEventListener("resize",()=>{sizeChart();drawChart();});
+  setTheme("dark");buildTopo();sizeChart();
+  ["temp","hum","soil","co2"].forEach(renderChip);renderLegend();startSim();
+})();
+</script>
+</body>
+</html>
