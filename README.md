@@ -36,8 +36,8 @@ This project is a working **smart greenhouse** that monitors soil moisture, CO�
 - A custom **web dashboard** consumes all of it over **MQTT-over-WebSocket** and can command the pump.
 - A final **security assessment** demonstrates a plaintext vulnerability on the MQTT layer and closes it with **TLS**.
 
-![Dashboard — night mode](assets/dashboard_night.png)
-*The live dashboard (night theme). Each tile is tagged with its source protocol: Temperature/Humidity over **LoRa**, Soil/CO₂ over **Zigbee**.*
+![Dashboard — night mode](assets/dashboard.png)
+*The live dashboard. Each tile is tagged with its source protocol: Temperature/Humidity over **LoRa**, Soil/CO₂ over **Zigbee**.*
 
 ---
 
